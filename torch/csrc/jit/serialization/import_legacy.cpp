@@ -47,12 +47,17 @@ class ScriptModuleDeserializer final {
         device_(device),
         source_importer_(
             compilation_unit_,
-            &constants_table_,
+            &constant_table_,
             [this](const std::string& qualifier) {
               return findSourceInArchiveFromQualifier(
                   *reader_, export_prefix_, qualifier);
             },
-            reader_->version()) {}
+            reader_->version()) {
+    for (auto& constant : constant_table_) {
+      TORCH_INTERNAL_ASSERT(constant.isTensor(), " expected a tensor");
+      tensor_table_.emplace_back(std::move(constant).toTensor());
+    }
+  }
 
   Module LEGACY_deserialize();
 
@@ -73,7 +78,9 @@ class ScriptModuleDeserializer final {
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unique_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
-  std::vector<at::Tensor> constants_table_;
+  // Legacy only tensor can be a constant.
+  std::vector<at::IValue> constant_table_;
+  std::vector<at::Tensor> tensor_table_;
   SourceImporter source_importer_;
   std::string export_prefix_ = "code/";
 };
@@ -140,7 +147,7 @@ IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(
         auto cls = source_importer_.loadType(qn)->expect<ClassType>();
         return c10::StrongTypePtr(compilation_unit_, std::move(cls));
       },
-      &constants_table_);
+      &tensor_table_);
   return ivalue;
 }
 
@@ -148,7 +155,7 @@ void ScriptModuleDeserializer::LEGACY_loadTensorTable(
     torch::ModelDef* model_def) {
   std::unordered_map<std::string, at::Storage> storageMap;
   for (const torch::TensorDef& tensor : model_def->tensors()) {
-    constants_table_.emplace_back(LEGACY_loadTensor(tensor, storageMap));
+    tensor_table_.emplace_back(LEGACY_loadTensor(tensor, storageMap));
   }
 }
 
@@ -283,7 +290,7 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
   }
   for (int i = 0; i < module_def.parameters_size(); ++i) {
     const torch::ParameterDef& param_def = module_def.parameters(i);
-    at::Tensor tensor = constants_table_.at(param_def.tensor_id());
+    at::Tensor tensor = tensor_table_.at(param_def.tensor_id());
     if (param_def.is_buffer()) {
       module.register_buffer(param_def.name(), tensor);
     } else {
