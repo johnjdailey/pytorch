@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/rref_impl.h>
+#include <ATen/record_function.h>
 
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
@@ -108,6 +109,7 @@ const ForkId& UserRRef::forkId() const {
 
 IValue UserRRef::toHere() const {
   // see Note [Best-Effort Check on Deleted UserRRefs]
+  RECORD_USER_SCOPE("to_here");
   TORCH_CHECK(
       !deletedOnOwner_,
       "User RRef with RRefId=",
